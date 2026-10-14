@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pintor de Simetría</title>
+<style>
+  :root {
+    --panel: rgba(20, 20, 32, 0.82);
+    --text: #e8e8f0;
+    --muted: #9a9ab0;
+    --accent: #ff4fd8;
+    --border: rgba(255, 255, 255, 0.12);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: #0b0b14; color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  canvas { display: block; touch-action: none; cursor: crosshair; }
+
+  .panel {
+    position: fixed; top: 16px; left: 16px;
+    width: 260px; max-width: calc(100vw - 32px);
+    padding: 16px; border-radius: 14px;
+    background: var(--panel); border: 1px solid var(--border);
+    backdrop-filter: blur(10px);
+    box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+    transition: transform .25s ease, opacity .25s ease;
+    max-height: calc(100vh - 32px); overflow-y: auto;
+  }
+  .panel.hidden { transform: translateX(calc(-100% - 24px)); opacity: 0; pointer-events: none; }
+  h1 { font-size: 17px; margin: 0 0 12px; letter-spacing: .3px; }
+  h1 span { color: var(--accent); }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 6px; }
+  label b { color: var(--text); font-weight: 600; float: right; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+
+  .palettes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .pal {
+    height: 28px; border-radius: 8px; border: 2px solid transparent;
+    cursor: pointer; padding: 0; font-size: 0;
+  }
+  .pal.active { border-color: #fff; }
+
+  .toggles { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
+  .toggle, .btn {
+    flex: 1; padding: 8px 6px; border-radius: 8px; font-size: 12px;
+    border: 1px solid var(--border); background: rgba(255,255,255,0.05);
+    color: var(--text); cursor: pointer; white-space: nowrap;
+  }
+  .toggle.on { background: var(--accent); border-color: var(--accent); color: #111; font-weight: 600; }
+  .btn:hover, .toggle:hover { filter: brightness(1.2); }
+  .btn.primary { background: var(--accent); color: #111; font-weight: 600; border-color: var(--accent); }
+  .row { display: flex; gap: 6px; margin-top: 14px; }
+  .hint { font-size: 11px; color: var(--muted); margin-top: 12px; line-height: 1.5; }
+  kbd { background: rgba(255,255,255,.1); padding: 1px 5px; border-radius: 4px; font-size: 10px; }
+
+  #showPanel {
+    position: fixed; top: 16px; left: 16px; display: none;
+    width: 40px; height: 40px; border-radius: 10px; font-size: 18px;
+    background: var(--panel); color: var(--text); border: 1px solid var(--border); cursor: pointer;
+  }
+  #toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: var(--panel); border: 1px solid var(--border); padding: 10px 16px;
+    border-radius: 10px; font-size: 13px; opacity: 0; transition: all .25s ease; pointer-events: none;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  #intro {
+    position: fixed; inset: 0; display: grid; place-items: center; pointer-events: none;
+    color: rgba(255,255,255,0.25); font-size: clamp(16px, 3vw, 24px); text-align: center;
+    transition: opacity .6s ease; padding: 16px;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="intro">✨ Arrastra para dibujar ✨</div>
+
+<div class="panel" id="panel">
+  <h1>Pintor de <span>Simetría</span></h1>
+
+  <label>Ejes de simetría <b id="axesVal">8</b></label>
+  <input type="range" id="axes" min="1" max="24" value="8">
+
+  <label>Grosor del pincel <b id="sizeVal">4</b></label>
+  <input type="range" id="size" min="1" max="40" value="4">
+
+  <label>Paleta</label>
+  <div class="palettes" id="palettes"></div>
+
+  <div class="toggles">
+    <button class="toggle on" id="mirror" title="Refleja también cada eje (M)">🪞 Espejo</button>
+    <button class="toggle on" id="glow" title="Brillo neón (G)">💡 Neón</button>
+    <button class="toggle" id="guides" title="Mostrar guías (H)">📐 Guías</button>
+  </div>
+
+  <div class="row">
+    <button class="btn" id="undo">↶ Deshacer</button>
+    <button class="btn" id="clear">🗑 Limpiar</button>
+  </div>
+  <div class="row">
+    <button class="btn" id="random">🎲 Sorpréndeme</button>
+    <button class="btn primary" id="save">💾 Guardar PNG</button>
+  </div>
+  <div class="row">
+    <button class="btn" id="hide">◀ Ocultar panel</button>
+  </div>
+
+  <div class="hint">
+    <kbd>Ctrl+Z</kbd> deshacer · <kbd>C</kbd> limpiar · <kbd>S</kbd> guardar<br>
+    <kbd>[</kbd> <kbd>]</kbd> grosor · <kbd>↑</kbd> <kbd>↓</kbd> ejes · <kbd>Tab</kbd> panel
+  </div>
+</div>
+<button id="showPanel" title="Mostrar panel (Tab)">☰</button>
+<div id="toast"></div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const BG = '#0b0b14';
+
+  // Cada paleta: lista de colores que se recorre suavemente mientras dibujas.
+  // "Arcoíris" es especial: gira el tono de forma continua.
+  const PALETTES = {
+    'Arcoíris': null,
+    'Neón':     ['#ff4fd8', '#00f0ff', '#7cff4f', '#fff04f'],
+    'Fuego':    ['#ff2a00', '#ff7b00', '#ffc300', '#ffe28a'],
+    'Océano':   ['#00c2ff', '#0066ff', '#00ffd5', '#9be7ff'],
+    'Pastel':   ['#ffb3c6', '#bde0fe', '#cdb4db', '#caffbf'],
+    'Oro':      ['#ffd700', '#fff1a8', '#d4a017', '#ffffff'],
+  };
+
+  const state = {
+    axes: 8, size: 4, mirror: true, glow: true, guides: false,
+    palette: 'Arcoíris', hue: Math.random() * 360, colorT: 0,
+    drawing: false, last: null, history: [],
+  };
+
+  // ---------- Lienzo y redimensionado ----------
+  let W = 0, H = 0, dpr = 1;
+  const guideCanvas = document.createElement('canvas'); // capa de guías superpuesta
+  guideCanvas.style.cssText = 'position:fixed;inset:0;pointer-events:none;';
+  document.body.insertBefore(guideCanvas, canvas.nextSibling);
+  const gctx = guideCanvas.getContext('2d');
+
+  function resize() {
+    const old = document.createElement('canvas');
+    old.width = canvas.width; old.height = canvas.height;
+    if (canvas.width) old.getContext('2d').drawImage(canvas, 0, 0);
+
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth; H = window.innerHeight;
+    for (const cv of [canvas, guideCanvas]) {
+      cv.width = W * dpr; cv.height = H * dpr;
+      cv.style.width = W + 'px'; cv.style.height = H + 'px';
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = BG; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Conserva el dibujo centrado al cambiar el tamaño de la ventana
+    if (old.width) ctx.drawImage(old, (canvas.width - old.width) / 2, (canvas.height - old.height) / 2);
+    state.history = [];
+    drawGuides();
+  }
+
+  function drawGuides() {
+    gctx.setTransform(1, 0, 0, 1, 0, 0);
+    gctx.clearRect(0, 0, guideCanvas.width, guideCanvas.height);
+    if (!state.guides) return;
+    gctx.setTransform(dpr, 0, 0, dpr, W / 2 * dpr, H / 2 * dpr);
+    const R = Math.hypot(W, H);
+    gctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    gctx.lineWidth = 1;
+    const n = state.axes;
+    for (let i = 0; i < n; i++) {
+      const a = (Math.PI * 2 * i) / n;
+      gctx.beginPath(); gctx.moveTo(0, 0);
+      gctx.lineTo(Math.cos(a) * R, Math.sin(a) * R); gctx.stroke();
+      if (state.mirror) {
+        const b = a + Math.PI / n;
+        gctx.setLineDash([4, 6]);
+        gctx.beginPath(); gctx.moveTo(0, 0);
+        gctx.lineTo(Math.cos(b) * R, Math.sin(b) * R); gctx.stroke();
+        gctx.setLineDash([]);
+      }
+    }
+  }
+
+  // ---------- Color ----------
+  function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
+  function currentColor() {
+    const pal = PALETTES[state.palette];
+    if (!pal) return `hsl(${state.hue % 360}, 100%, 62%)`;
+    const t = state.colorT % pal.length;
+    const i = Math.floor(t), f = t - i;
+    const a = hexToRgb(pal[i]), b = hexToRgb(pal[(i + 1) % pal.length]);
+    const mix = a.map((v, k) => Math.round(v + (b[k] - v) * f));
+    return `rgb(${mix.join(',')})`;
+  }
+  function advanceColor(dist) {
+    state.hue += dist * 0.35;
+    state.colorT += dist * 0.004;
+  }
+
+  // ---------- Dibujo con simetría ----------
+  function drawSegment(p0, p1) {
+    const color = currentColor();
+    const n = state.axes;
+    ctx.save();
+    ctx.setTransform(dpr, 0, 0, dpr, W / 2 * dpr, H / 2 * dpr);
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.lineWidth = state.size;
+    ctx.strokeStyle = color;
+    if (state.glow) { ctx.shadowColor = color; ctx.shadowBlur = state.size * 2.5 + 6; }
+
+    const x0 = p0.x - W / 2, y0 = p0.y - H / 2;
+    const x1 = p1.x - W / 2, y1 = p1.y - H / 2;
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const a = (Math.PI * 2 * i) / n, c = Math.cos(a), s = Math.sin(a);
+      ctx.moveTo(x0 * c - y0 * s, x0 * s + y0 * c);
+      ctx.lineTo(x1 * c - y1 * s, x1 * s + y1 * c);
+      if (state.mirror) { // reflejo sobre el eje X y luego rotación
+        ctx.moveTo(x0 * c + y0 * s, x0 * s - y0 * c);
+        ctx.lineTo(x1 * c + y1 * s, x1 * s - y1 * c);
+      }
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function pushHistory() {
+    try {
+      state.history.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+      if (state.history.length > 25) state.history.shift();
+    } catch (e) { /* sin memoria suficiente: se ignora */ }
+  }
+
+  // ---------- Eventos de puntero (ratón, táctil y lápiz) ----------
+  const intro = document.getElementById('intro');
+  canvas.addEventListener('pointerdown', e => {
+    canvas.setPointerCapture(e.pointerId);
+    pushHistory();
+    state.drawing = true;
+    state.last = { x: e.clientX, y: e.clientY };
+    drawSegment(state.last, { x: e.clientX + 0.01, y: e.clientY + 0.01 }); // punto inicial
+    intro.style.opacity = 0;
+  });
+  canvas.addEventListener('pointermove', e => {
+    if (!state.drawing) return;
+    const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+    for (const ev of events) {
+      const p = { x: ev.clientX, y: ev.clientY };
+      const d = Math.hypot(p.x - state.last.x, p.y - state.last.y);
+      if (d < 0.5) continue;
+      drawSegment(state.last, p);
+      advanceColor(d);
+      state.last = p;
+    }
+  });
+  const stop = () => { state.drawing = false; state.last = null; };
+  canvas.addEventListener('pointerup', stop);
+  canvas.addEventListener('pointercancel', stop);
+
+  // ---------- Acciones ----------
+  const toastEl = document.getElementById('toast');
+  let toastTimer;
+  function toast(msg) {
+    toastEl.textContent = msg; toastEl.classList.add('show');
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1600);
+  }
+
+  function undo() {
+    const img = state.history.pop();
+    if (!img) return toast('Nada que deshacer');
+    ctx.putImageData(img, 0, 0);
+  }
+  function clearCanvas() {
+    pushHistory();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = BG; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    toast('Lienzo limpio (Ctrl+Z para recuperar)');
+  }
+  function save() {
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    a.download = `simetria-${stamp}.png`;
+    a.href = canvas.toDataURL('image/png');
+    a.click();
+    toast('¡Imagen guardada! 🎉');
+  }
+  function randomize() {
+    const names = Object.keys(PALETTES);
+    setAxes(3 + Math.floor(Math.random() * 14));
+    setSize(1 + Math.floor(Math.random() * 14));
+    setPalette(names[Math.floor(Math.random() * names.length)]);
+    setToggle('mirror', Math.random() < 0.7);
+    state.hue = Math.random() * 360; state.colorT = Math.random() * 4;
+    toast(`🎲 ${state.axes} ejes · ${state.palette}`);
+  }
+
+  // ---------- Controles de la interfaz ----------
+  const $ = id => document.getElementById(id);
+  function setAxes(v) {
+    state.axes = Math.max(1, Math.min(24, v));
+    $('axes').value = state.axes; $('axesVal').textContent = state.axes; drawGuides();
+  }
+  function setSize(v) {
+    state.size = Math.max(1, Math.min(40, v));
+    $('size').value = state.size; $('sizeVal').textContent = state.size;
+  }
+  function setPalette(name) {
+    state.palette = name;
+    document.querySelectorAll('.pal').forEach(b => b.classList.toggle('active', b.dataset.name === name));
+  }
+  function setToggle(key, val) {
+    state[key] = val; $(key).classList.toggle('on', val);
+    if (key === 'mirror' || key === 'guides') drawGuides();
+  }
+
+  $('axes').addEventListener('input', e => setAxes(+e.target.value));
+  $('size').addEventListener('input', e => setSize(+e.target.value));
+  for (const key of ['mirror', 'glow', 'guides']) $(key).addEventListener('click', () => setToggle(key, !state[key]));
+  $('undo').addEventListener('click', undo);
+  $('clear').addEventListener('click', clearCanvas);
+  $('save').addEventListener('click', save);
+  $('random').addEventListener('click', randomize);
+
+  const panel = $('panel'), showBtn = $('showPanel');
+  function togglePanel(show) {
+    panel.classList.toggle('hidden', !show);
+    showBtn.style.display = show ? 'none' : 'block';
+  }
+  $('hide').addEventListener('click', () => togglePanel(false));
+  showBtn.addEventListener('click', () => togglePanel(true));
+
+  const palBox = $('palettes');
+  for (const [name, cols] of Object.entries(PALETTES)) {
+    const b = document.createElement('button');
+    b.className = 'pal'; b.dataset.name = name; b.title = name;
+    b.style.background = cols
+      ? `linear-gradient(90deg, ${cols.join(',')})`
+      : 'linear-gradient(90deg, red, orange, yellow, lime, cyan, blue, magenta)';
+    b.addEventListener('click', () => setPalette(name));
+    palBox.appendChild(b);
+  }
+
+  window.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT') return;
+    const k = e.key.toLowerCase();
+    if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); return undo(); }
+    if (e.ctrlKey || e.metaKey) return;
+    if (k === 'c') clearCanvas();
+    else if (k === 's') save();
+    else if (k === 'r') randomize();
+    else if (k === 'm') setToggle('mirror', !state.mirror);
+    else if (k === 'g') setToggle('glow', !state.glow);
+    else if (k === 'h') setToggle('guides', !state.guides);
+    else if (k === '[') setSize(state.size - 1);
+    else if (k === ']') setSize(state.size + 1);
+    else if (k === 'arrowup') { e.preventDefault(); setAxes(state.axes + 1); }
+    else if (k === 'arrowdown') { e.preventDefault(); setAxes(state.axes - 1); }
+    else if (k === 'tab') { e.preventDefault(); togglePanel(panel.classList.contains('hidden')); }
+  });
+
+  window.addEventListener('resize', resize);
+  resize();
+  setPalette(state.palette);
+})();
+</script>
+</body>
+</html>
